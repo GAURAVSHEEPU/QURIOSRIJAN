@@ -14,6 +14,7 @@ BOUNDS:
 """
 
 import os
+import re
 import json
 import threading
 from typing import Dict, Any, Optional, Tuple, List
@@ -105,6 +106,18 @@ def load_curriculum_topics(project_root: str = None) -> list[dict]:
     return []
 
 
+def _matches_domain_term(term: str, text: str) -> bool:
+    """Matches a domain keyword or phrase with word-boundary awareness."""
+    if not term or not text:
+        return False
+    # If the term consists solely of alphanumeric characters and underscores, use boundary lookarounds
+    if re.search(r'^[a-z0-9_]+$', term):
+        pattern = rf'(?<![a-zA-Z0-9]){re.escape(term)}(?![a-zA-Z0-9])'
+    else:
+        pattern = re.escape(term)
+    return bool(re.search(pattern, text, re.IGNORECASE))
+
+
 def is_quantum_or_learning_query(
     query: str,
     mode: str = "explain",
@@ -117,12 +130,28 @@ def is_quantum_or_learning_query(
     Executed BEFORE normal tutor answer-generation logic. Context-aware for multi-turn conversations.
     """
     query_lower = query.strip().lower() if query else ""
+    if not query_lower:
+        return False
 
-    # Explicit off-topic check for personal identity / general trivia
+    # Generic words alone (e.g. "explain", "help", "debug", "code", "study") or trivial tokens
+    # do NOT automatically bypass the domain guard
+    tokens = re.findall(r'[a-zA-Z0-9]+', query_lower)
+    generic_words = {"explain", "help", "debug", "code", "study", "why", "how", "hi", "hello", "hey", "test", "please"}
+    if not tokens or (len(tokens) <= 2 and all(tok in generic_words for tok in tokens)):
+        # Check if structured context or previous topic provides an explicit quantum context
+        s_key = session_key or get_session_key(extra_context=extra_context)
+        prev_topic = get_previous_topic(s_key, extra_context=extra_context)
+        has_struct_ctx = bool(extra_context and any(k in extra_context for k in ("circuit", "circuit_data", "quiz", "quiz_data", "responses")))
+        if not prev_topic and not has_struct_ctx:
+            return False
+
+    # Explicit off-topic phrases across trivia, sports, personal life, general cooking/shopping/tech
     off_topic_exact = {
         "what is my name", "what's my name", "who am i", "tell me my name", "what is my name?",
         "what is my age", "where do i live", "who is the president", "capital of france", "what is the capital of france?",
-        "tell me a joke about cats", "how to cook pasta", "what is the weather today"
+        "tell me a joke about cats", "how to cook pasta", "what is the weather today",
+        "explain photosynthesis", "help me choose a phone", "who will win tomorrow's cricket match?",
+        "write a romantic birthday message", "write a romantic birthday message."
     }
     if query_lower in off_topic_exact or "capital of france" in query_lower:
         return False
@@ -131,74 +160,98 @@ def is_quantum_or_learning_query(
         "what is my name", "what's my name", "who am i", "tell me my name",
         "capital of france", "capital of", "cook pasta", "recipe for",
         "weather today", "forecast", "movie recommendation",
-        "tell me a joke about cats", "football score", "world cup", "stock market"
+        "tell me a joke", "football score", "world cup", "cricket match",
+        "stock market", "photosynthesis", "romantic birthday", "choose a phone",
+        "buy a phone", "best smartphone", "dating advice", "horoscope"
     ]
-    quantum_explicit = ("quantum", "qubit", "qubits", "gate", "gates", "superposition", "entanglement", "circuit", "circuits", "hadamard", "shor", "grover", "bell state", "bloch", "measurement", "collapse")
+    quantum_explicit = (
+        "quantum", "qubit", "qubits", "gate", "gates", "superposition", "entanglement",
+        "circuit", "circuits", "hadamard", "shor", "grover", "bell state", "bloch",
+        "measurement", "collapse", "qiskit"
+    )
     for indicator in off_topic_indicators:
-        if indicator in query_lower and not any(q_term in query_lower for q_term in quantum_explicit):
+        if indicator in query_lower and not any(_matches_domain_term(q_term, query_lower) for q_term in quantum_explicit):
             return False
 
-    # Mode-based check for task modes
-    if mode in ("circuit_assistant", "circuit_explain", "quiz_analysis", "debug", "code_explain", "practice", "hint"):
-        return True
-
-    # Structured context checks (circuit, quiz)
+    # Structured context checks (circuit or quiz actively loaded)
     if extra_context and any(k in extra_context for k in ("circuit", "circuit_data", "quiz", "quiz_data", "responses")):
         return True
 
-    quantum_terms = {
-        "quantum", "qubit", "qubits", "superposition", "entanglement", "measurement",
-        "collapse", "hadamard", "cnot", "pauli", "gate", "gates", "bloch", "qiskit",
-        "bell state", "bell", "grover", "shor", "phase", "circuit", "circuits",
-        "algorithm", "algorithms", "decoherence", "bra", "ket", "wavefunction",
-        "statevector", "hamiltonian", "unitary", "fidelity", "teleportation",
-        "fourier", "qft", "vqe", "qaoa", "deutsch", "bernstein", "simon", "amplitude",
-        "oracle", "register", "qasm", "aer", "ibmq", "hardware", "spin", "photon",
-        "eigenstate", "matrix", "matrices", "eigenvalue", "schrodinger", "dirac",
-        "application", "applications", "rsa"
-    }
+    # Mode-based check for circuit and quiz assistants
+    if mode in ("circuit_assistant", "circuit_explain", "quiz_analysis"):
+        return True
 
-    learning_terms = {
-        "quiz", "score", "recommendation", "learning path", "curriculum", "module",
-        "lesson", "exercise", "practice", "study", "progress", "weakness", "strength",
-        "skill level", "how do i learn", "tutor", "help me with quantum", "quantum learning",
-        "explain", "hint", "debug", "code", "application", "applications"
-    }
+    # Primary Quantum Concepts & Terminology (full domain vocabulary with word-boundary awareness)
+    quantum_terms = [
+        "quantum", "qubit", "qubits", "superposition", "entanglement", "measurement",
+        "collapse", "hadamard", "cnot", "pauli", "gate", "gates", "bloch", "bloch sphere", "qiskit",
+        "bell state", "bell states", "bell", "grover", "shor", "phase", "circuit", "circuits",
+        "decoherence", "bra", "ket", "wavefunction", "statevector", "hamiltonian",
+        "unitary", "fidelity", "teleportation", "fourier", "qft", "vqe", "qaoa",
+        "deutsch", "bernstein", "simon", "amplitude", "oracle", "register", "qasm",
+        "aer", "ibmq", "spin", "photon", "eigenstate", "eigenvalue", "schrodinger",
+        "dirac", "rsa", "no-cloning", "error correction", "surface code", "transmon",
+        "ion trap", "neutral atom", "quantum anneal", "quantum walk", "quantum key",
+        "qkd", "bb84", "phase kickback", "density matrix", "pure state", "mixed state",
+        "quantum algorithm", "quantum algorithms", "quantum computer", "quantum computers",
+        "quantum computing", "quantum error correction", "quantum teleportation", "quantum walk"
+    ]
 
     for term in quantum_terms:
-        if term in query_lower:
+        if _matches_domain_term(term, query_lower):
             return True
 
     if curriculum:
         for topic_dict in curriculum:
             topic_name = topic_dict.get("name", "").lower()
             topic_id = topic_dict.get("topic_id", "").lower()
-            if topic_name and topic_name in query_lower:
+            if topic_name and _matches_domain_term(topic_name, query_lower):
                 return True
-            if topic_id and topic_id in query_lower:
+            if topic_id and _matches_domain_term(topic_id, query_lower):
                 return True
 
-    for l_term in learning_terms:
-        if l_term in query_lower and len(query_lower.split()) > 1:
+    # Classical Math, Physics, and Programming CONNECTED to Quantum Computing
+    # Matches classical terms only when query mentions simulation, quantum concepts, or gate representations
+    math_programming_terms = [
+        "complex number", "complex numbers", "probability amplitude", "linear algebra", "tensor product",
+        "hermitian", "matrix multiplication", "inner product", "outer product",
+        "norm", "orthogonal", "vector space", "hilbert space", "unitary matrix",
+        "pauli matrix", "matrix exponential", "python", "numpy", "scipy", "matrix", "matrices"
+    ]
+    quantum_connection_indicators = [
+        "quantum", "qubit", "qubits", "gate", "gates", "state", "states",
+        "superposition", "circuit", "circuits", "bloch", "qiskit"
+    ]
+    for m_term in math_programming_terms:
+        if _matches_domain_term(m_term, query_lower):
+            # If the query also mentions a quantum connection indicator
+            if any(_matches_domain_term(conn, query_lower) for conn in quantum_connection_indicators):
+                return True
+
+    # Quantum Learning Platform Terms (only when explicitly referencing the platform, tutor, or quantum learning)
+    quantum_learning_phrases = [
+        "how do i learn quantum", "quantum learning", "quantum tutor", "help me with quantum",
+        "practice quantum", "study quantum", "quantum curriculum", "quantum path",
+        "learn quantum computing", "quantum roadmap"
+    ]
+    for ql_phrase in quantum_learning_phrases:
+        if _matches_domain_term(ql_phrase, query_lower):
             return True
 
     # Context-aware follow-up check:
-    # Check if there is an active previous quantum topic in conversation
+    # Only if there is an active previous quantum topic in the conversation session
     s_key = session_key or get_session_key(extra_context=extra_context)
     prev_topic = get_previous_topic(s_key, extra_context=extra_context)
 
     if prev_topic and prev_topic != "General":
-        # Follow-up pronoun and conversational phrase indicators
+        # Follow-up conversational pronouns and referential phrases directly referencing previous exchange
         referential_triggers = [
             "it", "its", "that", "this", "they", "them", "why", "how", "example",
             "different", "classical bit", "difference", "useful", "break rsa", "what about",
-            "how does", "why is", "can you", "is it", "what happens", "explain", "implement"
+            "how does", "why is", "can you", "is it", "what happens", "explain", "implement",
+            "show me", "give me an example", "why is it different"
         ]
-        if any(trig in query_lower for trig in referential_triggers):
-            return True
-
-        # Short queries (< 10 words) in an active quantum conversation
-        if len(query_lower.split()) <= 10:
+        if any(_matches_domain_term(trig, query_lower) for trig in referential_triggers):
             return True
 
     return False
@@ -722,15 +775,20 @@ LEARNER ADAPTATION ({skill_level.upper()} LEVEL):
 - If Intermediate: Provide concepts + mathematics, examples, circuits, and algorithm intuition.
 - If Advanced: Provide mathematical detail, formal linear algebra notation, complexity, implementation details, and research-level context.
 
-TEACHING STYLE:
-Act like a tutor. Preferred explanation sequence (adapt naturally to query length):
-1. Direct answer to user's exact question
-2. Intuition & conceptual framing
-3. Technical / mathematical explanation
-4. Example or Qiskit code / circuit representation
-5. Important caveat / misconception to avoid
-6. Optional next step
-Short questions can receive short answers; complex questions get detailed sectioned answers.
+TEACHING STYLE & CONCISENESS:
+Act like a human tutor giving focused, direct instruction.
+1. Answer Length & Density:
+   - For standard questions, provide a concise, direct answer: aim for 80–150 words (approximately 180 words maximum).
+   - Answer directly in 1–2 well-structured paragraphs.
+   - Do NOT force every answer into a rigid multi-heading format, and do NOT force unnecessary equations, examples, misconceptions, or next steps into ordinary explanations.
+   - Allow longer, detailed responses (>180 words) ONLY when:
+     * The user explicitly asks for detail (e.g., "in detail", "deep dive", "thoroughly", "step by step", "comprehensive"), OR
+     * The user asks a multi-part question, OR
+     * The topic genuinely requires mathematical proofs or multi-step derivations.
+2. Lightweight Structure:
+   - Simple / introductory questions: Direct, plain explanation in 1–2 short paragraphs.
+   - Technical questions: Brief conceptual explanation with an equation or short example only when helpful.
+   - Multi-part questions: Use clear Markdown headings to separate the distinct parts requested by the user.
 
 ACCURACY & ANTI-HALLUCINATION RULES:
 - Accuracy is more important than sounding confident. Never invent algorithms, gates, experimental results, learner scores, quiz results, circuit outputs, citations, or hardware capabilities.
@@ -748,7 +806,7 @@ Python/deterministic analysis IS THE SOURCE OF TRUTH for scores, percentages, co
 NEVER calculate or invent the score. Explain why incorrect answers were wrong, clarify the correct quantum concepts, and recommend targeted practice.
 
 MODE INSTRUCTIONS ({mode.upper()}):
-- explain / chat: Provide clear conceptual explanations tailored to {skill_level} difficulty. Structure responses clearly with headings when appropriate.
+- explain / chat: Provide clear conceptual explanations tailored to {skill_level} difficulty. Keep ordinary answers direct and concise (80–150 words).
 - hint: Provide progressive hints WITHOUT revealing the full direct answer immediately.
 - debug: Identify code bugs, explain why they occur, and provide corrected Qiskit syntax.
 - code_explain: Provide step-by-step code walkthroughs for Qiskit circuits.
@@ -767,7 +825,7 @@ MODE INSTRUCTIONS ({mode.upper()}):
 RESPONSE REQUIREMENTS:
 You MUST respond strictly in valid JSON format matching this schema:
 {{
-    "answer": "Detailed, encouraging, unescaped Markdown response directly addressing every part of user's query about {context['current_topic']}",
+    "answer": "Direct, concise Markdown response (80-150 words for standard questions, max ~180 words unless detail explicitly requested) addressing user query about {context['current_topic']}",
     "concept": "{context['current_topic']}",
     "difficulty": "{skill_level}",
     "mode": "{mode}",
@@ -783,7 +841,8 @@ You MUST respond strictly in valid JSON format matching this schema:
 def build_critic_system_prompt() -> str:
     """Constructs system prompt instructions for the AI Critic LLM."""
     return """You are an AI Critic for a Quantum Computing Educational Platform.
-Evaluate the candidate AI tutor response on pedagogical accuracy, relevance to the exact question asked, topic correctness, completeness, difficulty fit, clarity, factual consistency, and freedom from quantum misconceptions.
+Evaluate the candidate AI tutor response on pedagogical accuracy, relevance to the exact question asked, topic correctness, appropriate conciseness (80–150 words normally, ~180 words max unless in-depth detail was explicitly requested), clarity, factual consistency, and freedom from quantum misconceptions.
+Do NOT penalize a response for brevity if it accurately and directly answers the question without redundant padding.
 
 Respond strictly in valid JSON format matching this schema:
 {
@@ -963,7 +1022,7 @@ def tutor(
     if not is_quantum_or_learning_query(query, mode=mode, extra_context=extra_context, curriculum=curriculum, session_key=s_key):
         off_topic_suggestions = generate_dynamic_suggestions(query, "General", mode, learner_profile, extra_context, is_off_topic=True)
         return {
-            "answer": "That's outside the scope of the Quantum Tutor. I can help you with quantum computing topics such as qubits, superposition, entanglement, quantum gates, circuits, algorithms, and measurement.",
+            "answer": "That's outside the scope of the Quantum Tutor. QURIO specializes in quantum computing and quantum algorithms, including qubits, superposition, entanglement, quantum gates, and circuits. For example, you could ask: 'How does a Hadamard gate create superposition?'",
             "concept": "General",
             "difficulty": learner_profile.get("skill_level", "Intermediate") if learner_profile else "Intermediate",
             "mode": mode,

@@ -6,6 +6,7 @@ and loop engineering integration without calling live network services.
 """
 
 import json
+import os
 import unittest
 from unittest.mock import patch, MagicMock
 from urllib.error import URLError, HTTPError
@@ -104,7 +105,8 @@ class TestGroqProviderOffline(unittest.TestCase):
     def test_7_invalid_model_configuration(self):
         """7. Test client instantiation with custom model name or default Groq model."""
         client = LLMClient(provider="groq", api_key="gsk_test_key")
-        self.assertEqual(client.model, "llama-3.3-70b-versatile")
+        expected_default = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+        self.assertEqual(client.model, expected_default)
         
         custom_client = LLMClient(provider="groq", model="mixtral-8x7b-32768", api_key="gsk_test_key")
         self.assertEqual(custom_client.model, "mixtral-8x7b-32768")
@@ -118,6 +120,29 @@ class TestGroqProviderOffline(unittest.TestCase):
         self.assertGreaterEqual(res["quality_score"], 85.0)
         self.assertLessEqual(res["iterations"], 3)
 
+    def test_9_user_agent_header(self):
+        """9. Test that outgoing Groq request includes QURIO-QuantumTutor/1.0 User-Agent header."""
+        captured_request = None
+
+        def fake_urlopen(req, timeout=15):
+            nonlocal captured_request
+            captured_request = req
+            mock_res = MagicMock()
+            mock_res.read.return_value = json.dumps({
+                "choices": [{"message": {"content": json.dumps({"answer": "Qubit test"})}}]
+            }).encode("utf-8")
+            mock_res.__enter__.return_value = mock_res
+            return mock_res
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            client = LLMClient(provider="groq", api_key="gsk_mock_key")
+            client.generate_completion("System prompt", "User prompt")
+
+        self.assertIsNotNone(captured_request)
+        user_agent = captured_request.get_header("User-agent")
+        self.assertEqual(user_agent, "QURIO-QuantumTutor/1.0")
+
 
 if __name__ == "__main__":
     unittest.main()
+

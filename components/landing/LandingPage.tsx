@@ -1075,7 +1075,7 @@ export default function QuantumAtlasLandingPage() {
               }}
             >
               <div>
-                © 2026 The Qurio Atlas · Inspired by the Joint Quantum Institute (JQI) Quantum Atlas · Built for SIH 2026
+                © 2026 The Qurio Atlas · Inspired by the Joint Quantum Institute (JQI) Quantum Atlas 
               </div>
 
               <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>

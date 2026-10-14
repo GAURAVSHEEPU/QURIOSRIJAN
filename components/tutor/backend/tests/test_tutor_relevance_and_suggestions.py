@@ -73,7 +73,8 @@ class TestTutorRelevanceAndSuggestions(unittest.TestCase):
         res = tutor("What is the capital of France?", mode="explain", use_mock=True)
         self.assertTrue(res.get("is_off_topic"))
         self.assertIn("outside the scope of the Quantum Tutor", res["answer"])
-        self.assertNotIn("Hadamard", res["answer"])
+        self.assertIn("QURIO specializes in quantum computing", res["answer"])
+        self.assertIn("For example", res["answer"])
 
     def test_9_dynamic_suggestions_per_topic(self):
         """TEST 9: Suggestions after two different topics reflect CURRENT topic and do not repeat previous set."""
@@ -127,9 +128,11 @@ class TestTutorRelevanceAndSuggestions(unittest.TestCase):
 
     def test_13_groq_provider_integration(self):
         """13. Groq provider still works (via LLMClient initialization and mocked response)."""
+        import os
         client = LLMClient(provider="groq", api_key="gsk_test_key_12345")
         self.assertEqual(client.provider, "groq")
-        self.assertEqual(client.model, "llama-3.3-70b-versatile")
+        expected_default = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+        self.assertEqual(client.model, expected_default)
         
         with patch("urllib.request.urlopen") as mock_urlopen:
             mock_response = MagicMock()

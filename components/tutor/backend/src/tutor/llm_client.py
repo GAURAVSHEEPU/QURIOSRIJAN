@@ -13,7 +13,12 @@ import urllib.request
 import urllib.error
 from dotenv import load_dotenv
 
-load_dotenv()
+# Ensure .env in backend directory is always loaded even if executed from repo root
+_backend_env = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.env"))
+if os.path.exists(_backend_env):
+    load_dotenv(_backend_env)
+else:
+    load_dotenv()
 
 from src.tutor.mock_llm import MockLLMClient
 
@@ -65,7 +70,8 @@ class LLMClient:
                 url = "https://api.groq.com/openai/v1/chat/completions" if self.provider == "groq" else "https://api.openai.com/v1/chat/completions"
                 headers = {
                     "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self.api_key}"
+                    "Authorization": f"Bearer {self.api_key}",
+                    "User-Agent": "QURIO-QuantumTutor/1.0"
                 }
                 
                 payload = {

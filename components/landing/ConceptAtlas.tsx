@@ -316,7 +316,7 @@ export default function ConceptAtlas() {
                   }}
                 >
                   <img
-                    src={entry.imageUrl ?? 'https://imgs.search.brave.com/xvn3zv2cbMRRHQigvnuepIi_WsE2VJEIbD2ZafSbHMc/rs:fit:860:0:0:0/g:ce/aHR0cHM6Ly93YWxs/cGFwZXJzLmNvbS9p/bWFnZXMvaGQvbmVv/bi1zLWluLWhlYXJ0/LTNpeHdpeGY5cmNq/Z2JvNGMuanBn'}
+                    src={entry.imageUrl ?? 'https://www.shutterstock.com/image-vector/classical-vs-quantum-bit-visualizing-260nw-2621511891.jpg'}
                     alt=""
                     aria-hidden="true"
                     style={{

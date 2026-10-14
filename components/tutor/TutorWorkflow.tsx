@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowRight,
@@ -22,6 +22,7 @@ import AtlasNav from '../shared/AtlasNav';
 import Stickman from '../roadmap/Stickman';
 import { CIRCUIT_ACCENT } from '../circuit/circuitData';
 import { askTutorBackend, checkTutorBackendHealth } from './tutorClient';
+import TutorMarkdownRenderer from './TutorMarkdownRenderer';
 
 type GoalId = 'foundations' | 'circuit' | 'entanglement';
 
@@ -98,6 +99,14 @@ export default function TutorWorkflow() {
   const [prompts, setPrompts] = useState<string[]>(DEFAULT_PROMPTS);
   const [isGenerating, setIsGenerating] = useState(false);
   const [backendConnected, setBackendConnected] = useState<boolean | null>(null);
+  const chatBodyRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll chat body to bottom when messages change or AI is generating
+  useEffect(() => {
+    if (chatBodyRef.current) {
+      chatBodyRef.current.scrollTo({ top: chatBodyRef.current.scrollHeight, behavior: 'smooth' });
+    }
+  }, [messages, isGenerating]);
 
   const goal = GOALS.find((item) => item.id === goalId) ?? GOALS[0];
   const step = goal.steps[stepIndex];
@@ -269,7 +278,7 @@ export default function TutorWorkflow() {
               <Lightbulb size={17} color={CIRCUIT_ACCENT} />
             </div>
 
-            <div className="tutor-chat-body">
+            <div className="tutor-chat-body" ref={chatBodyRef}>
               {messages.map((item) => (
                 item.role === 'user' ? (
                   <div className="tutor-question" key={item.id}>
@@ -278,13 +287,13 @@ export default function TutorWorkflow() {
                 ) : (
                   <div className="tutor-message" key={item.id} style={{ marginBottom: 12 }}>
                     <Stickman pose="teach" size={48} accent={CIRCUIT_ACCENT} />
-                    <div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
                       {item.concept && (
                         <div style={{ fontSize: 10, fontWeight: 700, color: '#D97706', textTransform: 'uppercase', marginBottom: 2 }}>
                           {item.concept} {item.quality ? `• Quality: ${Math.round(item.quality)}%` : ''}
                         </div>
                       )}
-                      <p style={{ margin: 0, fontSize: 13, lineHeight: 1.55 }}>{item.text}</p>
+                      <TutorMarkdownRenderer content={item.text} />
                     </div>
                   </div>
                 )
