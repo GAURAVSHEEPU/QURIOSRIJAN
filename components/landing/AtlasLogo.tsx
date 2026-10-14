@@ -29,6 +29,7 @@ export default function AtlasLogo({ size = 48, showText = true }: AtlasLogoProps
           sizes={`${size * 4}px`}
           style={{ objectFit: 'cover', objectPosition: 'center' }}
           priority
+          unoptimized
         />
       </div>
     </Link>
