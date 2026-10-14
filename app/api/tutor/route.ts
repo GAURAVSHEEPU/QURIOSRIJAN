@@ -1,63 +1,46 @@
 import { NextResponse } from 'next/server';
-import http from 'node:http';
 
-const TUTOR_BACKEND_HOST = '127.0.0.1';
-const TUTOR_BACKEND_PORT = 8000;
+const BACKEND_BASE_URL = (process.env.BACKEND_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '');
 
-function queryPythonBackend(endpoint: string, method: string, data?: any): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const payload = data ? JSON.stringify(data) : undefined;
-    const req = http.request(
-      {
-        hostname: TUTOR_BACKEND_HOST,
-        port: TUTOR_BACKEND_PORT,
-        path: endpoint,
-        method,
-        headers: {
-          ...(payload
-            ? {
-                'Content-Type': 'application/json',
-                'Content-Length': Buffer.byteLength(payload),
-              }
-            : {}),
-        },
-        timeout: 15000,
+async function queryPythonBackend(
+  endpoint: string,
+  method: string,
+  data?: unknown
+): Promise<{ ok: boolean; status: number; data?: unknown; error?: unknown }> {
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const url = `${BACKEND_BASE_URL}${cleanEndpoint}`;
+  const payload = data ? JSON.stringify(data) : undefined;
+
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: {
+        ...(payload ? { 'Content-Type': 'application/json' } : {}),
       },
-      (res) => {
-        let body = '';
-        res.setEncoding('utf8');
-        res.on('data', (chunk) => {
-          body += chunk;
-        });
-        res.on('end', () => {
-          try {
-            const parsed = JSON.parse(body);
-            resolve({ ok: (res.statusCode ?? 200) < 400, status: res.statusCode ?? 200, data: parsed });
-          } catch {
-            resolve({ ok: false, status: res.statusCode ?? 500, error: body });
-          }
-        });
-      }
-    );
-
-    req.on('error', (err) => reject(err));
-    req.on('timeout', () => {
-      req.destroy();
-      reject(new Error('Backend request timed out'));
+      body: payload,
+      signal: AbortSignal.timeout(15000),
     });
 
-    if (payload) {
-      req.write(payload);
+    let parsed: unknown;
+    try {
+      parsed = await res.json();
+    } catch {
+      const text = await res.text().catch(() => '');
+      return { ok: res.ok, status: res.status, error: text };
     }
-    req.end();
-  });
+
+    return { ok: res.ok, status: res.status, data: parsed };
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : 'Backend connection error';
+    return { ok: false, status: 503, error: errorMsg };
+  }
 }
 
 export async function GET() {
   try {
     const res = await queryPythonBackend('/health', 'GET');
     if (res.ok) {
-      return NextResponse.json({ connected: true, ...res.data });
+      return NextResponse.json({ connected: true, ...(res.data as object) });
     }
     return NextResponse.json({ connected: false, status: res.status }, { status: 502 });
   } catch {

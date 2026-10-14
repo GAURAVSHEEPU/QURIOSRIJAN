@@ -21,47 +21,36 @@ export interface TutorReply {
   isAi: boolean;
 }
 
-const DIRECT_BACKEND_URL = 'http://127.0.0.1:8000';
-const PROXY_URL = '/api/tutor';
+const API_TUTOR_URL = '/api/tutor';
+const API_HEALTH_URL = '/api/health';
 const TIMEOUT_MS = 14000;
-
-function isLocalEnvironment(): boolean {
-  if (typeof window === 'undefined') return false;
-  const h = window.location.hostname;
-  return h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h === '::1';
-}
 
 /**
  * Check if the Python AI Tutor backend is active and healthy.
+ * Points to relative /api paths so it routes cleanly both in local Next.js dev
+ * and on Vercel multi-service architecture (/api/(.*) -> backend service).
  */
 export async function checkTutorBackendHealth(): Promise<boolean> {
-  if (!isLocalEnvironment()) {
-    try {
-      const res = await fetch(PROXY_URL, { signal: AbortSignal.timeout(2000) });
-      const data = await res.json();
-      return Boolean(data.connected);
-    } catch {
-      return false;
-    }
-  }
-
+  // 1. Try relative /api/health (direct backend rewrite on Vercel)
   try {
-    const res = await fetch(`${DIRECT_BACKEND_URL}/health`, {
-      signal: AbortSignal.timeout(1800),
-    });
+    const res = await fetch(API_HEALTH_URL, { signal: AbortSignal.timeout(2000) });
     if (res.ok) {
       const data = await res.json();
       return data.status === 'ok' && data.tutor_available !== false;
     }
   } catch {
-    // Fall back to probing Next.js proxy
-    try {
-      const res = await fetch(PROXY_URL, { signal: AbortSignal.timeout(2000) });
+    // Fall back to /api/tutor status probe
+  }
+
+  // 2. Try relative /api/tutor GET probe
+  try {
+    const res = await fetch(API_TUTOR_URL, { signal: AbortSignal.timeout(2000) });
+    if (res.ok) {
       const data = await res.json();
-      return Boolean(data.connected);
-    } catch {
-      return false;
+      return Boolean(data.connected || data.status === 'ok');
     }
+  } catch {
+    return false;
   }
 
   return false;
@@ -69,6 +58,7 @@ export async function checkTutorBackendHealth(): Promise<boolean> {
 
 /**
  * Sends a question to the AI Tutor backend with rich grounded context.
+ * Points to relative /api/tutor path for client-side execution.
  * Falls back gracefully to deterministic guidance if the service is unreachable.
  */
 export async function askTutorBackend(opts: TutorAskOptions): Promise<TutorReply> {
@@ -84,47 +74,18 @@ export async function askTutorBackend(opts: TutorAskOptions): Promise<TutorReply
     },
   };
 
-  // 1. Try Direct FastAPI Backend (fastest & handles CORS directly on localhost)
-  if (isLocalEnvironment()) {
-    try {
-      const directRes = await fetch(`${DIRECT_BACKEND_URL}/api/tutor`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-      });
-
-      if (directRes.ok) {
-        const data = await directRes.json();
-        return {
-          answer: data.answer || 'I am ready to help you explore this quantum step.',
-          concept: data.concept,
-          difficulty: data.difficulty,
-          hint: data.hint,
-          next_step: data.next_step,
-          quality_score: data.quality_score,
-          suggestions: Array.isArray(data.suggestions) ? data.suggestions : [],
-          isAi: true,
-        };
-      }
-    } catch {
-      // Direct call failed or timed out, attempt proxy next
-    }
-  }
-
-  // 2. Try Next.js API Route Proxy
   try {
-    const proxyRes = await fetch(PROXY_URL, {
+    const res = await fetch(API_TUTOR_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
 
-    if (proxyRes.ok) {
-      const data = await proxyRes.json();
+    if (res.ok) {
+      const data = await res.json();
       return {
-        answer: data.answer || 'Grounded step response.',
+        answer: data.answer || 'I am ready to help you explore this quantum step.',
         concept: data.concept,
         difficulty: data.difficulty,
         hint: data.hint,

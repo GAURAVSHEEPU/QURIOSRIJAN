@@ -10,6 +10,7 @@ router = APIRouter(tags=["Health"])
 
 
 @router.get("/health", response_model=HealthResponse)
+@router.get("/api/health", response_model=HealthResponse)
 def health_check(store: ArtifactStore = Depends(get_artifact_store)):
     """
     Health check endpoint to verify backend service operational status and model readiness.
